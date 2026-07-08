@@ -1,16 +1,15 @@
 # Distributed Credit Card Fraud Detection
-### Apache Spark MLlib, Hadoop HDFS, Docker, Python
+### Apache Spark MLlib · Hadoop HDFS · Docker · Python
 
-**Dataset:** [Credit Card Fraud Detection](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) 
--- download `creditcard.csv` and upload to HDFS at `/user/fraud/raw/creditcard.csv`
+**Dataset:** [Credit Card Fraud Detection](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) -- download `creditcard.csv` and place it in the `data/` folder before running any scripts
 
 ---
 
 ## Overview
 
-Distributed machine learning pipeline for credit card fraud detection using Apache Spark MLlib on a multi-container Hadoop/Spark cluster deployed via Docker. The project covers the full data engineering lifecycle -- from distributed storage in HDFS through exploratory analytics, model training, hyperparameter optimization, and scalability analysis across increasing data volumes.
+Built an end-to-end distributed machine learning pipeline for credit card fraud detection using Apache Spark MLlib on a multi-container Hadoop/Spark cluster deployed via Docker. The project covers the full data engineering lifecycle -- from distributed storage in HDFS through exploratory analytics, model training, hyperparameter optimization, and scalability analysis across increasing data volumes.
 
-The core challenge this project addresses is extreme class imbalance: only 0.17% of transactions in the dataset are fraudulent, as is the case with most fraud detection datasets. Standard machine learning approaches fail on datasets like this because a model that always predicts "legitimate" achieves 99.83% accuracy while catching zero fraud. This project implements several techniques to overcome that challenge and achieve a final PR-AUC of 0.9885 with zero missed fraud cases.
+The core challenge this project addresses is extreme class imbalance: only 0.17% of transactions in the dataset are fraudulent. Standard machine learning approaches fail on datasets like this because a model that always predicts "legitimate" achieves 99.83% accuracy while catching zero fraud. This project implements several techniques to overcome that challenge and achieve a final PR-AUC of 0.9885 with zero missed fraud cases.
 
 ---
 
@@ -45,9 +44,9 @@ Two separate Docker clusters bridged together via a dual-network gateway node:
 Hadoop Cluster                          Spark Cluster
 (docker-hadoop_default network)         (docker-spark_spark-net)
 
-namenode       -- HDFS metadata        spark-master  -- cluster manager
+namenode        -- HDFS metadata        spark-master  -- cluster manager
 datanode-1      -- data blocks          spark-worker  -- executor (2 cores, 2GB)
-datanode-2     -- replica blocks       spark-client  -- driver + network bridge
+datanode-2      -- replica blocks       spark-client  -- driver + network bridge
 nodemanager-1   -- YARN tasks
 nodemanager-2   -- YARN tasks
 resourcemanager -- job coordination
@@ -56,6 +55,70 @@ resourcemanager -- job coordination
 `spark-client` connects to both networks and acts as the gateway between the storage layer (Hadoop) and the compute layer (Spark). `spark-worker` connects directly to the Hadoop network to stream data blocks from the datanodes during model training, bypassing the driver for data transfer.
 
 Static IP assignment on the Spark network ensures stable hostname resolution across container restarts without manual network reconfiguration.
+
+The `spark-client` container is built from `Dockerfile.client` rather than the standard Spark image. It extends `spark:3.5.7-python3` with `wget`, `pip`, `pyspark`, and `pandas` to support the full analytics and ML workload. The build happens automatically when you run `docker-compose up -d` for the first time.
+
+---
+
+## Reproducing This Project
+
+### Prerequisites
+
+- Docker Desktop
+- A running Hadoop cluster (the Spark compose file expects a Docker network named `docker-hadoop_default` to already exist)
+- The `creditcard.csv` dataset downloaded from Kaggle
+
+### Setup
+
+**1. Clone the repo:**
+```bash
+git clone https://github.com/yourusername/credit-card-fraud-detection
+cd credit-card-fraud-detection
+```
+
+**2. Place the dataset in the data folder:**
+```bash
+cp ~/Downloads/creditcard.csv data/creditcard.csv
+```
+
+The `data/` folder maps to `/opt/data/` inside the Spark containers via the volume mount in `docker-compose.yml`. All scripts read from this location.
+
+**3. Start the Spark cluster:**
+```bash
+docker-compose up -d
+```
+
+This builds the `spark-client` image from `Dockerfile.client` on first run and starts all three Spark containers. Make sure your Hadoop cluster is already running before this step.
+
+**4. Upload data to HDFS:**
+```bash
+docker cp data/creditcard.csv docker-hadoop-namenode-1:/tmp/creditcard.csv
+docker exec -i docker-hadoop-namenode-1 hdfs dfs -mkdir -p /user/fraud/raw
+docker exec -i docker-hadoop-namenode-1 hdfs dfs -put -f /tmp/creditcard.csv /user/fraud/raw/creditcard.csv
+```
+
+**5. Run the scripts in order:**
+```bash
+# exploratory analysis
+docker exec -it spark-client /opt/spark/bin/spark-submit \
+  --master spark://spark-master:7077 \
+  /opt/data/fraud_analytics.py
+
+# baseline model
+docker exec -it spark-client /opt/spark/bin/spark-submit \
+  --master spark://spark-master:7077 \
+  /opt/data/fraud_model.py
+
+# improved model (takes ~60 min due to cross validation)
+docker exec -it spark-client /opt/spark/bin/spark-submit \
+  --master spark://spark-master:7077 \
+  /opt/data/fraud_model_v2.py
+
+# scalability analysis
+docker exec -it spark-client /opt/spark/bin/spark-submit \
+  --master spark://spark-master:7077 \
+  /opt/data/fraud_scalability.py
+```
 
 ---
 
@@ -67,9 +130,9 @@ Loaded the raw CSV into HDFS with 3x replication across two datanodes. Created a
 
 ```
 /user/fraud/
-├── raw/creditcard.csv          -- 151MB, 3 replicas
-├── processed/                  -- preprocessed output
-└── mapreduce_output/           -- aggregation results
+raw/creditcard.csv          -- 151MB, 3 replicas
+processed/                  -- preprocessed output
+mapreduce_output/           -- aggregation results
 ```
 
 Verified data integrity with `hdfs dfsadmin -report` confirming block distribution across both datanodes.
@@ -174,11 +237,23 @@ Two findings stood out. First, model quality improved consistently with more dat
 ## Repository Structure
 
 ```
-fraud_project/
+credit-card-fraud-detection/
+README.md
+.gitignore
+requirements.txt
+docker-compose.yml
+Dockerfile.client
 fraud_analytics.py       -- Spark SQL exploratory analysis (5 queries)
 fraud_model.py           -- Baseline GBT model with class weighting
 fraud_model_v2.py        -- Improved model with all enhancements
 fraud_scalability.py     -- Scalability experiment (1x to 10x)
+ data/
+    .gitkeep             -- keeps the data/ folder tracked by Git
+ results/
+     v1_evaluation.png
+     v2_evaluation.png
+     scalability_table.png
+     spark_ui.png
 ```
 
 ---
