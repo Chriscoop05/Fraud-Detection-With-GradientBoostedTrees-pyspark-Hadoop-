@@ -1,0 +1,18 @@
+FROM spark:3.5.7-python3
+
+USER root
+
+# keep it tiny and safe: only install wget & pip (no systemd)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends wget ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# ensure pip is present for the system python (python3 is 3.10 in base image)
+RUN python3 -m pip install --upgrade pip
+
+# optional python packages for your workloads
+RUN python3 -m pip install --no-cache-dir pyspark pandas
+
+# drop back to spark user used in the base image
+USER spark
+WORKDIR /opt/spark

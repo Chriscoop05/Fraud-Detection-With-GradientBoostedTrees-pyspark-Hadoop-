@@ -1,0 +1,90 @@
+version: "3.8"
+services:
+  spark-master:
+    image: spark:3.5.7-python3
+    container_name: spark-master
+    hostname: spark-master
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.master.Master
+      - --host
+      - spark-master
+      - --port
+      - "7077"
+      - --webui-port
+      - "8080"
+    environment:
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_PORT: 7077
+      SPARK_MASTER_WEBUI_HOST: 0.0.0.0
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    restart: unless-stopped
+    networks:
+      spark-net:
+        ipv4_address: 172.20.0.2
+    volumes:
+      - ./data:/opt/data
+
+  spark-worker:
+    image: spark:3.5.7-python3
+    container_name: spark-worker
+    hostname: spark-worker
+    depends_on:
+      - spark-master
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.worker.Worker
+      - spark://spark-master:7077
+      - --webui-port
+      - "8081"
+    environment:
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_WORKER_INSTANCES: 1
+      SPARK_LOCAL_IP: 172.20.0.4
+      SPARK_WORKER_HOST: 172.20.0.4
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+    networks:
+      spark-net:
+        ipv4_address: 172.20.0.4
+      hadoop-net:
+    volumes:
+      - ./data:/opt/data
+
+  spark-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    image: my-spark-client:3.5.7-debug
+    container_name: spark-client
+    hostname: spark-client
+    environment:
+      SPARK_HOME: /opt/spark
+      PYSPARK_PYTHON: /usr/bin/python3
+      PYSPARK_DRIVER_PYTHON: /usr/bin/python3
+      SPARK_LOCAL_IP: 172.20.0.3
+    depends_on:
+      - spark-master
+    command: ["tail","-f","/dev/null"]
+    restart: unless-stopped
+    networks:
+      spark-net:
+        ipv4_address: 172.20.0.3
+      hadoop-net:
+    volumes:
+      - ./examples:/opt/examples
+      - ./data:/opt/data
+
+networks:
+  spark-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+  hadoop-net:
+    external: true
+    name: docker-hadoop_default
